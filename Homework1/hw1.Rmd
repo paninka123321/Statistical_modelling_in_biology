@@ -1,10 +1,24 @@
+---
+title: "Homework 1"
+output: html_document
+date: "2025-03-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
 # Homework 1
 library(readr)
 library(ggplot2)
 library(dplyr)
 library(broom)
-bmi_study <- read_csv("~/Desktop/Magisterka/Statistical modelling in biology/bmi_study.csv", 
-                      +     na = "NA")
+bmi_study <- read_csv("~/Desktop/Magisterka/Statistical modelling in biology/bmi_study.csv", na = "NA")
+
+```
+
+
+```{r load-data}
+# Data
+head(bmi_study)
 
 # Checking if data has missing values 
 sum(is.na(bmi_study)) # there isn't any missing values
@@ -14,6 +28,8 @@ summary(bmi_study)
 
 # Check data structure
 str(bmi_study)
+
+## Task 1
 
 # The infection and complication varaibles which we are interested in are binary values
 # this is good for as they are our outcome variables
@@ -89,37 +105,5 @@ ggplot(complication_summary, aes(x = term, y = estimate, ymin = conf.low, ymax =
        x = "Predictors",
        y = "Hazard Ratio") +
   theme_minimal()
-
-
-# For future visualisations:
-# Predict probabilities for infection model
-bmi_study$infection_prob <- predict(glm_infection2, type = "response")
-
-# Predict probabilities for complication model
-bmi_study$complication_prob <- predict(glm_comlication2, type = "response")
-
-bmi_study$lower_lungremoved <- 0.04342597
-bmi_study$upper_lungremoved <- 0.3659666
-
-bmi_study$lower_lobesremoved <- 1.78902849
-bmi_study$upper_lobesremoved <- 7.2249939
-
-bmi_study$lower_sexM <- 1.177509125
-bmi_study$upper_sexM <- 5.5794539
-
-bmi_study$lower_smoking <- 1.550911495
-bmi_study$upper_smoking <- 32.0074817
-
-bmi_study$lower_bmi_infection <- 0.852122152
-bmi_study$upper_bmi_infection <-  0.9991341
-
-bmi_study$lower_bmi_complications <- 0.93373765
-bmi_study$upper_bmi_complications <- 1.0099919
-
-bmi_study$lower_hospstay <- 1.007893107
-bmi_study$upper_hospstay<- 1.0242511
-
-
-
-
+```
 
