@@ -1,0 +1,559 @@
+---
+title: "Study of water level in Odra river near Trestno (1980-2023)"
+author: Paulina Kulczyk
+output: html_document
+date: "2025-05-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+```
+
+# Introduction
+This study aims to analyze data from the Institute of Meteorology and Water Management (IMGW) regarding water levels in the Odra River near the town of Trestno. In addition to river level data, we incorporate precipitation measurements from the Brzeg meteorological station to investigate the potential influence of rainfall on water levels.
+
+Our primary objective is to determine whether specific months or levels of precipitation are associated with an increased risk of flooding. Furthermore, the study will include a forecasting component, in which we will attempt to predict water levels over the next 12 months based on historical trends and observed patterns.
+
+# Data loading and cleaning
+***Hydrological dataset:***
+```{r load-data, message=FALSE, warning=FALSE}
+# Load data
+library(readr)
+
+hydro <- read_csv2("trestno.csv")
+precip <- read_csv2("brzeg.csv")
+
+# Check structure
+glimpse(hydro)
+
+```
+
+Upon reviewing the dataset, it was found that the temp and flow columns contain irrelevant or erroneous data. Specifically, these columns consist entirely of placeholder or unrealistic values (999 for temperature and 1e+08 for flow). As these values do not reflect actual measurements, these columns will be excluded from the analysis.
+
+Additionally, it is important to distinguish between two types of months in the context of this study: calendar months and hydrological months. The hydrological year begins in November and ends in October of the following calendar year. Consequently, November is considered the first month of the hydrological year. The hydrological year is identified by the calendar year in which it concludes—for example, the 2021 hydrological year begins on 1 October 2020 and ends on 30 September 2021. Given this structure, it is reasonable to add the calendar year as an additional variable in the dataset.
+```{r load-data2, message=FALSE, warning=FALSE}
+#drop data
+hydro <- hydro[, !(names(hydro) %in% c("flow", "temp"))]
+hydro$year <- ifelse(hydro$hmonth %in% c("01", "02"),
+                     hydro$hyear - 1,
+                     hydro$hyear)
+
+```
+
+***Precipitation dataset:***
+```{r load-data3, message=FALSE, warning=FALSE}
+
+glimpse(precip)
+sum(precip$status1 == 9 | precip$status1 == 8,na.rm = TRUE)
+```
+
+Since this dataset will primarily be used to analyze precipitation and its correlation with hydrological variables, it is essential to ensure the accuracy and reliability of the precipitation data. As in many IMGW datasets 8	is used to mark invalid or rejected measurement and 9 - missing or suspicious data. To maintain data quality, we have chosen to remove all records where status1 equals 8 or 9. These values pertain specifically to the quality of the precipitation.mm variable. This filtering step affects only 99 observations out of a total of 10,703, which represents less than 1% of the dataset. Therefore, the impact on the overall data size and integrity is minimal.
+```{r load-data4, message=FALSE, warning=FALSE}
+precip <- precip[!precip$status1 %in% c(8, 9), ]
+glimpse(precip)
+```
+# EDA
+At this stage of the study, we present an exploratory analysis of the dataset, focusing on two key hydrological variables: daily river water level (measured near Wrocław) and daily precipitation (recorded at the nearest meteorological station, Brzeg). 
+***Overall Distribution of River Water Levels:***
+```{r data-distribution, echo=TRUE, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(dplyr)
+
+# Ensure month is factor ordered from 1 to 12 for seasonal plot
+hydro <- hydro %>%
+  mutate(month = factor(month, levels = sprintf("%02d", 1:12)))
+
+# 1. Histogram with density curve
+ggplot(hydro, aes(x = level)) +
+  geom_histogram(aes(y = ..density..), bins = 50, fill = "skyblue", color = "black") +
+  geom_density(color = "red", size = 1) +
+  labs(title = "Distribution of Daily River Water Level (Odra)",
+       x = "Water Level", y = "Density") +
+  theme_minimal()
+
+# 2. Seasonal histograms by month
+ggplot(hydro, aes(x = level)) +
+  geom_histogram(aes(y = ..density..), bins = 50, fill = "steelblue", color = "black") +
+  facet_wrap(~ month, ncol = 4) +
+  labs(title = "Monthly Histograms of River Water Level",
+       x = "Water Level", y = "Count") +
+  theme_minimal()
+
+# 3. Seasonal boxplots by month
+ggplot(hydro, aes(x = month, y = level)) +
+  geom_boxplot(fill = "orange", outlier.color = "red", outlier.shape = 1) +
+  labs(title = "Monthly Distribution of River Water Level",
+       x = "Month", y = "Water Level") +
+  theme_minimal()
+library(e1071)  # for skewness and kurtosis
+skewness(hydro$level, na.rm = TRUE)
+kurtosis(hydro$level, na.rm = TRUE)
+
+```
+
+The first figure shows the distribution of daily river water levels in the Odra River from 1980 to 2023. A histogram (blue bars) is overlaid with a kernel density estimate (red line) to visualize the underlying shape of the data.
+
+We observe that:
+
+* Most daily measurements are concentrated between 300 mm and 350 mm, forming a sharp central peak.
+* There is a long tail toward higher values, extending beyond 700 mm — although very few observations fall in this extreme range, the density line remains above zero, confirming their presence.
+* The left side of the distribution tapers off more quickly than the right, visually suggesting positive skewness.
+
+To quantify this, we calculate the skewness and kurtosis of the water level data:
+
+- Skewness: -0.67
+- Kurtosis: 12.14
+
+While the negative skewness may seem counterintuitive based on the visual tail (and could reflect a concentration of slightly below-average water levels), the practical tail risk clearly lies on the right, where extremely high water levels (e.g., floods) occasionally occur. This combination suggests slight asymmetry but with significant extreme events.
+
+The high kurtosis (well above the normal value of 3) indicates a leptokurtic distribution: one with a tall, sharp peak and fat tails. This is typical for hydrological variables — most days are stable, but rare, extreme values occur with greater-than-expected frequency under a normal distribution.
+
+To investigate potential seasonal effects in the river water levels, we analyzed the data using monthly histograms and boxplots (Figures 2 and 3).
+
+Histogram plots show the distribution of daily water levels for each month throughout the year:
+
+* Spring and early summer months (e.g., April to June) display longer right tails, suggesting that extreme high levels (potential floods) are more likely in this period.
+* Winter months (December–February) have on the other hand longer longer left tails, indicating lower level of water.
+
+
+Looking at boxplots, we find that:
+
+* Across the months April through December, the median river level remains relatively stable. This suggests a consistent baseline in river behavior during the bulk of the year. 
+* In contrast, the months of January and February display slightly lower medians, likely reflecting the hydrological impact of winter conditions — including reduced precipitation, snow accumulation, or slower runoff processes.
+* January and February exhibit the widest boxes, indicating the highest variability in day-to-day water levels within the middle 50% of the data.
+* From March onward, the IQR narrows, implying more stable mid-range values throughout spring, summer, and autumn.
+* The highest number and magnitude of outliers are observed in May through August, aligning with potential heavy rainfall or flood events.
+* These outliers are well above the whiskers, reinforcing the earlier finding of leptokurtic distribution — rare but extreme deviations.
+
+This suggests that summer months are particularly prone to extreme hydrological events, such as heavy rainfall or flooding, which aligns with known seasonal precipitation patterns and convective storm activity in Central Europe.
+
+***Overall Distribution of Percipitation [mm]:***
+```{r precip-histogram, echo=TRUE}
+library(dplyr)
+library(ggplot2)
+
+# Convert precip.mm to numeric, coercing errors to NA
+precip_clean <- precip %>%
+  mutate(
+    precip.mm = as.numeric(precip.mm),  # convert string to numeric
+  )
+
+
+
+### Histogram + Density plot overall:
+
+ggplot(precip_clean, aes(x = precip.mm)) +
+  geom_histogram(aes(y = ..density..), bins = 50, fill = "skyblue", color = "black") +
+  geom_density(color = "red", size = 1) + 
+  labs(title = "Distribution of Daily Precipitation (mm)",
+       x = "Precipitation (mm)",
+       y = "Count") +
+  theme_minimal()
+
+
+## Step 3: Seasonal boxplots by month
+
+ggplot(precip_clean, aes(x = month, y = precip.mm)) +
+  geom_boxplot(fill = "lightgreen", outlier.size = 1) +
+  labs(title = "Monthly Distribution of Daily Precipitation",
+       x = "Month",
+       y = "Precipitation (mm)") +
+  theme_minimal()
+
+## Step 4: Optional — Monthly histograms (like you did for water level)
+
+ggplot(precip_clean, aes(x = precip.mm)) +
+  geom_histogram(aes(y = ..density..), bins = 50, fill = "lightblue", color = "black") +
+  facet_wrap(~ month, ncol = 4) +
+  labs(title = "Monthly Histograms of Daily Precipitation",
+       x = "Precipitation (mm)",
+       y = "Count") +
+  theme_minimal()
+```
+
+To assess potential precipitation drivers of Odra River level fluctuations, we analyzed precipitation data from the Brzeg meteorological station — the nearest consistent recording site to Wrocław. Both daily and monthly precipitation distributions were visualized using histograms and boxplots.
+
+The first histogram represents the distribution of daily precipitation across the observed period (1980–2023):
+
+* The distribution is highly right-skewed, with the vast majority of days experiencing zero or near-zero rainfall.
+* There is a sharp peak at 0 mm, indicating many dry days.
+* A long right tail represents fewer but substantial rain events, consistent with convective or storm-related rainfall.
+* The overall shape is closely aligned with an exponential distribution, which is typical for daily precipitation data in temperate climates.
+
+The monthly precipitation histograms and boxplots reveal important seasonal features:
+
+* During winter months there are definitly less perciptation observed (high peak at 0)
+* Highest median precipitation occurs in the summer months (June, July, August), with July peaking both in terms of central tendency and spread.
+* The lowest precipitation levels are recorded during February and March, aligning with the region’s typically drier late-winter conditions.
+* Variability (IQR) is greatest during June–August, suggesting that not only is summer wetter, but also more unpredictable, potentially contributing to short-term flood risk.
+* Outliers are present across several months, especially in June, July and August, indicating occasional heavy rainfall events — likely tied to convective storms or prolonged rain episodes.
+
+These observations confirm a strong seasonal pattern, where late spring to summer carries both higher precipitation volumes and greater variability, creating ideal conditions for triggering extreme river levels — especially in a catchment-sensitive system like Odra's.
+
+## Relationship between river level and percipitation
+Understanding the relationship between daily and cumulative precipitation and river water levels is crucial in evaluating flood risk and hydrological response dynamics. A series of diagnostic visualizations were employed to study this relationship from multiple statistical and temporal perspectives.
+```{r correlations}
+# Create a proper Date column in both
+hydro <- hydro %>%
+  mutate(date = as.Date(paste(year, month, day, sep = "-")))
+
+precip <- precip %>%
+  mutate(date = as.Date(paste(year, month, day, sep = "-")))
+
+# Example join by date and (if same location) name
+combined <- inner_join(hydro, precip, by = c("date"), suffix = c("_hydro", "_precip"))
+
+# If still character, force conversion
+combined$precip.mm <- as.numeric(as.character(combined$precip.mm))
+
+ggplot(combined, aes(x = precip.mm, y = level)) + 
+  geom_point(alpha = 0.3, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "darkred") +
+  scale_x_continuous(breaks = seq(0, max(combined$precip.mm, na.rm = TRUE), by = 5)) +
+  labs(title = "Relationship between Daily Precipitation and River Level",
+       x = "Precipitation [mm]",
+       y = "River Level [cm]") +
+  theme_minimal()
+
+
+ggplot(combined, aes(x = precip.mm, y = level)) + 
+  geom_point(alpha = 0.3, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "darkred") +
+  scale_x_continuous(breaks = seq(0, max(combined$precip.mm, na.rm = TRUE), by = 5)) +
+  coord_cartesian(xlim = c(0, 20)) +  # focus on main range
+  labs(x = "Precipitation [mm]", y = "River Level [cm]",
+       title = "Relationship between Daily Precipitation and River Level - Focused")
+
+ggplot(combined, aes(x = precip.mm, y = level)) +
+  geom_point(alpha = 0.3, color = "steelblue") +
+  geom_smooth(method = "loess", se = TRUE, color = "darkred") +
+  scale_x_log10() +
+  labs(x = "Precipitation [mm] (log scale)", y = "River Level [cm]",
+       title = "River Level vs. Log Daily Precipitation")
+
+
+
+```
+
+* The scatter plot shows a weak but visible positive association between daily precipitation (x-axis) and river level (y-axis).
+* The fitted smoothing curve (red line) shows a flat response for low precipitation, with a slight upward bend for high precipitation values.
+* A large proportion of observations are clustered at low precipitation values, particularly below 10 mm/day, where the river level shows substantial variation even with little rainfall. This suggest influence from other factors such as upstream inflow, snowmelt, or groundwater contributions.
+
+As our data has the strong right skew in daily precipitation, we decide to perform log-transformation. On the log scale, we again observe a weak positive association, but more clearly distinguish rainfall events across magnitudes. As before the red smoothed curve shows a slight increase in river levels, but the effect is still subtle.
+
+Worth noting is that high precipitation events (>30 mm/day) are relatively rare, they can lead to elevated water levels, although, not in scale that we can expect. This could be due to some dampends (like other nature situation) or delation (one day of heavy rain don't make huge change in water river, we should look at the some amount of days).
+
+```{r adv-plot}
+#lag analysis, lag-effect
+library(slider)
+
+# Example: 5-day rolling sum of precipitation
+combined <- combined %>%
+  arrange(date) %>%
+  mutate(precip_5d = slider::slide_dbl(as.numeric(precip.mm), ~sum(.x, na.rm = TRUE), .before = 4, .complete = TRUE))
+
+# Plot lagged correlation
+ggplot(combined, aes(x = precip_5d, y = level)) +
+  geom_point(alpha = 0.3, color = "darkgreen") +
+  geom_smooth(method = "lm", color = "black") +
+  labs(title = "5-Day Cumulative Precipitation vs. River Level",
+       x = "5-Day Precipitation Total [mm]",
+       y = "River Level [cm]") +
+  theme_minimal()
+
+
+```
+
+“5-Day Cumulative Precipitation vs. River Level” chart illustrates a more statistically meaningful relationship:
+* A clearer positive trend appears as the total 5-day precipitation increases.
+* The river level responds more systematically to accumulated precipitation.
+Cumulative rainfall over several days provides a stronger predictor of river water levels than daily totals.
+
+To compare daily vs 5-day cumulative precipitation impact on river and strenghten the findings from plots we condust Person correlation test. 
+```{r person cor scores}
+cor_test <- cor.test(as.numeric(combined$precip.mm), combined$level, use = "complete.obs")
+cor_test
+library(zoo)
+
+combined <- combined[order(combined$date), ]  # Ensure data is time-ordered
+combined$precip_5day <- rollapply(combined$precip.mm, width = 5, align = "right", fill = NA, FUN = sum, na.rm = TRUE)
+valid_data <- na.omit(combined[, c("precip_5day", "level")])
+cor_5days_test <- cor.test(valid_data$precip_5day, valid_data$level)
+cor_5days_test
+```
+
+Daily Precipitation vs. River Level: 
+
+- The correlation is positive but weak, indicating that river level responds only modestly to daily precipitation alone.
+
+
+5-Day Cumulative Precipitation vs. River Level:
+
+- The correlation is stronger and more significant than for daily precipitation.
+- This suggests that short-term precipitation accumulation better explains river level variability.
+- The results support the presence of delayed hydrological response to rainfall, consistent with soil saturation, runoff generation, and flow accumulation dynamics.
+
+
+```{r another plots}
+#sesonal cor plot
+combined %>%
+  mutate(month = lubridate::month(date, label = TRUE)) %>%
+  ggplot(aes(x = precip.mm, y = level)) +
+  geom_point(alpha = 0.2) +
+  facet_wrap(~ month) +
+  labs(title = "Monthly Relationship between Precipitation and River Level",
+       x = "Daily Precipitation [mm]",
+       y = "River Level [cm]") +
+  theme_minimal()
+
+library(dplyr)
+library(ggplot2)
+
+# Summarize average river level per month-year
+monthly_level <- hydro %>%
+  mutate(month = as.integer(month),
+         year = as.integer(year)) %>%
+  group_by(year, month) %>%
+  summarize(avg_level = mean(level, na.rm = TRUE)) %>%
+  ungroup()
+
+ggplot(monthly_level, aes(x = factor(month), y = factor(year), fill = avg_level)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(option = "plasma") +
+  labs(title = "Heatmap of Average Monthly River Level",
+       x = "Month",
+       y = "Year",
+       fill = "Avg Level (cm)") +
+  theme_minimal()
+```
+Monthly scatter plots show the relationship between daily precipitation and river levels broken down by calendar month:
+* Summer and early Autumn months tend to show slightly more spread, potentially reflecting stronger convective storms or rapid surface runoff.
+* In winter months, river levels vary even when precipitation is minimal — possibly due to snowmelt, ice processes, or different runoff mechanisms. In these months it is also less possibility of floods as the maximum level of water remains about 450 cm. 
+Based on that we can say winter dynamics are more complex and not always tied directly to rainfall. These months need to study also other data then only precipitation. 
+
+Heatmap of average monthly river levels per year show that certain years (like 1997, 2010) stand out with notably elevated levels in specific months (May and July), possibly corresponding to flood events. Higher level of water among 1970-2023 years was seen from April to October. Definitly the less posibility of flood is during January - March and November - December.
+
+Summing up:
+* Daily precipitation alone is a weak predictor of river water level.
+* Cumulative precipitation (5-day totals) shows a clearer, positive correlation.
+* River level behavior is seasonally modulated, with different runoff dynamics in winter versus summer.
+* Spring and summer months are the most prone to flood event
+* Winter level of water, although is safe in way of flood, shows that its also vary. But the study show that other events then percipitation possibly have also big impact on this level, as percipitation don't show relevant influence.
+
+# Time series analysis
+```{r ts}
+library(lubridate)
+library(xts)
+library(dygraphs)
+
+# Create the xts objects
+level_xts <- xts(hydro$level, order.by = hydro$date)
+precip_xts <- xts(combined$precip.mm, order.by = combined$date)
+
+# Check summaries
+summary(level_xts)
+summary(precip_xts)
+
+combined_xts <- merge(level_xts, precip_xts)
+
+
+# Create interactive plot
+dygraph(combined_xts, main = "River Level and Precipitation Over Time") %>%
+  dySeries("level_xts", label = "River Level [cm]", color = "blue") %>%
+  dySeries("precip_xts", label = "Precipitation [mm]", color = "green") %>%
+  dyRangeSelector() %>%  # Adds a zoomable slider
+  dyOptions(stackedGraph = FALSE, drawGrid = TRUE)
+
+```
+
+This time series plot visualizes river level (blue) and precipitation (green) over the full observation period.
+* We observe regular seasonal spikes (mostly in Spring and Summer) in river level, frequently aligned with higher precipitation events, though not exclusively.
+* Some extreme river level peaks occur independently (for example January 10th, 1982 - 490cm), suggesting other contributing factors such as snowmelt or upstream discharge.
+
+To gain a deeper understanding of the underlying patterns in the time series data, we applied seasonal-trend decomposition. 
+```{r monthly-ts}
+library(zoo)
+
+
+
+library(forecast)
+
+
+
+# Create year-month column
+combined$year_month <- floor_date(combined$date, "month")
+
+# Aggregate to monthly mean
+monthly_data <- combined %>%
+  group_by(year_month) %>%
+  summarise(
+    mean_level = mean(level, na.rm = TRUE),
+    mean_precip = mean(precip.mm, na.rm = TRUE)
+  )
+
+# Create ts objects
+level_ts <- ts(monthly_data$mean_level,
+               start = c(year(min(monthly_data$year_month)),
+                         month(min(monthly_data$year_month))),
+               frequency = 12)
+
+precip_ts <- ts(monthly_data$mean_precip,
+                start = c(year(min(monthly_data$year_month)),
+                          month(min(monthly_data$year_month))),
+                frequency = 12)
+# Decompose
+level_decomp <- stl(level_ts, s.window = "periodic")
+precip_decomp <- stl(precip_ts, s.window = "periodic")
+
+# Plot
+plot(level_decomp, main = "STL Decomposition: Monthly River Level")
+plot(precip_decomp, main = "STL Decomposition: Monthly Precipitation")
+
+
+
+```
+
+The river level seasonal-trend decomposition illustrates:
+* A strong seasonal component, with consistent cyclical patterns.
+* A weak long-term trend, indicating relative stationarity in mean behavior over the decades.
+* The remainder (residuals) shows no clear structure, supporting appropriate seasonal modeling.
+
+The precipitation sesonal-trend decomposition shows:
+* A clear seasonal signature (as the river level).
+* A more pronounced and slightly upward trend compared to river level, possibly reflecting climate variability or improved measurement accuracy.
+* Residuals display heteroscedasticity and occasional large deviations (e.g. storms).
+
+Now, we want to model and forecast daily river level using lagged precipitation (precipitation lagged by 5 days) as a predictor.
+
+```{r arima}
+
+ccf(
+  x = as.numeric(combined$precip_5d), 
+  y = as.numeric(combined$level), 
+  lag.max = 12, 
+  na.action = na.omit,
+  main = "Cross-correlation: Precipitation → River Level"
+)
+
+
+# Linear model
+lm_model <- lm(level ~ precip_5d, data = as.data.frame(combined))
+summary(lm_model)
+plot(combined$precip_5d, combined$level, 
+     xlab = "Precipitation (lagged 5 days)", ylab = "River Level",
+     main = "River Level vs Lagged Precipitation")
+abline(lm_model, col = "blue")
+library(zoo)
+
+# Fit ARIMA with external regressor
+library(forecast)
+fit_arima <- auto.arima(combined$level, xreg = combined$precip_5d)
+
+summary(fit_arima)
+
+# Forecast next 14 days using 14 last precipitation as estimation of future precip values
+future_precip <- tail(combined$precip_5d, 14)
+forecast_arima <- forecast(object = fit_arima, xreg = future_precip, h=14)
+autoplot(forecast_arima)
+```
+To investigate the temporal relationship between precipitation and river level, a cross-correlation function (CCF) analysis was performed using 5-day lagged daily precipitation (precip_5d) and the corresponding river level observations.
+
+The CCF plot displays the correlation coefficients between the two time series across a range of ±12 days. The analysis reveals a strong and statistically significant positive correlation centered around lag 0, with significant values extending from approximately lag -10 to +10. This pattern indicates that 5-day lagged precipitation is positively associated with river level, especially around the same day (lag 0).
+
+The peak correlation at lag 0 confirms that the chosen lag structure—shifting precipitation data by five days—is appropriate for capturing the delayed hydrological response of the river system to rainfall. Moreover, the persistence of positive correlation in subsequent lags suggests that the influence of precipitation on river level is not instantaneous but extends over several days, which aligns with expected watershed behavior.
+
+We fit linear regression model to forecast river level based on 5 days lagged precipotation.
+
+- precip_5d coefficient: 0.521 (SE = 0.030, p < 2e-16)
+
+This coefficient inform us that 1 mm increase in 5-day lagged precipitation is associated with a 0.52 unit increase in river level. The relationship is statistically significant.
+
+
+- Multiple R² = 0.0473 
+
+Only about 4.7% of the variance in river level is explained by lagged precipitation.
+
+- Residual standard error = 36.85 units.
+
+The linear relationship is present, but weak — likely due to many other influencing factors (e.g., soil saturation, runoff time, upstream flow).
+
+We also decide to use more spcialistic model in case of predicting time series data - ARIMA model.
+The forecast plot shows predicted river level with tight confidence intervals, indicating stability.
+The forecasts appear to continue within the historical level range (~200–500).
+
+Worth noting is that we used real (not forecasted) precipitation for prediction, which might underestimate forecast uncertainty.
+
+
+#Extreme value analysis
+```{r mean-exces plot}
+library(evir)
+meplot(combined$level)
+
+```
+
+This Mean Residual Life Plot (MRL) plot evaluates the threshold for a Generalized Pareto Distribution (GPD) in extreme value modeling.
+The MRL becomes approximately linear beyond a certain threshold (~400), indicating suitability for threshold-based EVT modeling.
+
+To assess the statistical properties of extreme river levels, we fitted the Generalized Extreme Value (GEV) distribution to two sets of maxima derived from the dataset:
+
+- maximum river level observed each year
+- maximum river level observed each month
+
+```{r GEV for month and annual maxima}
+annual_max <- aggregate(level ~ year_precip, combined, max)
+monthly_max <- aggregate(level ~ month_precip, combined, max)
+library(ismev)
+gev_fit <- gev.fit(annual_max$level)
+summary(gev_fit)
+gev_fit2 <- gev.fit(monthly_max$level)
+summary(gev_fit2)
+```
+
+Let us discuss first the annual results. From the stationary model we get:
+
+* Extremes have tendency to be close to the central value (close to 300 mm - 350 mm) - the location value is equal 367.6
+* A scale of ~32 means there’s moderate fluctuation in the extremes from year to year.
+* The positive shape parameter (0.276) suggests a heavy-tailed distribution, implying a higher probability of very large river levels.
+
+
+For the monthly maxima, GEV fit give us:
+* The location parameter is slightly higher than for annual maxima (439.81)
+* Monthly aggregation might pick up local peaks, which can be higher in some months compared to the single max per year.
+* A scale of ~31 means there’s moderate fluctuation in the extremes from month to month.
+* Compared to the annual σ (~32.35), it’s quite similar, indicating comparable variability in both monthly and annual extremes.
+* The shape parameter is very close to zero (–0.016).
+* This suggests the distribution is effectively light tail:
+  - The risk of extreme outliers is low.
+  - Monthly river level extremes are likely stable, with less chance of extreme floods in individual months.
+  
+Based on the Mean Excess plot we applied a GPD model to the river level data using a threshold of 400, meaning only river levels greater than 400 were modeled as extremes.
+```{r GPD for POT xceedenced}
+threshold <-  400  
+gpd_fit <- gpd.fit(combined$level, threshold)
+summary(gpd_fit)
+```
+
+* Shape value is very close to 0 (0.008), which suggests that the tail of the distribution is light, and exceedances decay exponentially. This indicates extremes aren't too heavy.
+* About 1.17% of all river level observations exceed 400. This gives an idea of how rare such extremes are.
+
+
+# Conclusions
+This study presents a comprehensive hydrological analysis of the Odra River near Trestno, integrating over four decades of river level and precipitation data. 
+
+Our findings reveal strong seasonal trends in both river levels and precipitation. Summer months (June–August) exhibit the highest median rainfall and variability, aligning with the highest frequency of outlier river levels. In contrast, winter months show lower precipitation and water levels, but with more complex hydrological influences, such as snowmelt or upstream contributions.
+
+While daily precipitation has only a weak direct correlation with river level, the 5-day cumulative precipitation shows a significantly stronger association. This delayed response supports established hydrological theory: catchments respond to accumulated rainfall over several days, not just isolated events. However, linear models explain only a small portion of the variability in river level, indicating the presence of additional influencing factors such as soil saturation, snow processes, or human regulation.
+
+Time series decomposition confirms strong seasonality but no clear long-term trend in river levels, suggesting climatic stationarity in mean behavior. Precipitation, on the other hand, shows signs of a subtle upward trend, potentially related to climatic variability.
+
+Forecasting efforts using ARIMA and linear regression with lagged precipitation proved statistically valid, though limited in predictive power due to the system's complexity. Importantly, the forecasts remained within historical water level ranges.
+
+To understand the behavior of extreme events, we fitted both GEV and GPD models. The GEV analysis of annual maxima suggests a moderately heavy-tailed distribution, implying a non-negligible risk of extreme flooding. However, monthly maxima were characterized by a near-zero shape parameter, indicating relatively stable extremes at a monthly scale. The GPD model, using a threshold of 400 mm, confirmed that such high water levels are rare and that extreme exceedances are not fat-tailed, further suggesting limited potential for unprecedented floods under historical conditions.
+
+In conclusion, the Odra River near Trestno demonstrates seasonal vulnerability to flooding, especially during summer months when rainfall is intense and variable. Lagged precipitation and cumulative rainfall are more meaningful predictors of flood risk than daily totals. While extreme river levels are rare, they follow predictable statistical patterns, allowing for targeted monitoring and modeling. Future work could incorporate upstream flow data, snowmelt modeling, and land use changes to improve flood forecasting and risk assessment.
+
+
+
+
